@@ -1,0 +1,38 @@
+------------------------------------------------------------------------------
+C  Threshold model for antibody production, from:
+C  A threshold model of antigen-stimulated antibody production 
+C  P. Waltman                                                                  
+C  Theoretical Immunology  (Immunology Ser. 8), Dekker (New York)              
+C  1978, pp. 437--453                                                          
+C                                                                              
+C  y1'(t) = -r y1(t) y2(t) - s y1(t) y4(t)                                     
+C  y2'(t) = -r y1(t) y2(t) + alpha r y1(y5(t)) y2(y5(t)) H(t-t0)               
+C  y3'(t) =  r y1(t) y2(t)                                                     
+C  y4'(t) = -s y1(t) y4(t) - gamma y4(t) + beta r y1(y6(t)) y2(y6(t)) H(t-t1)  
+C  y5'(t) = H(t-t0) f1(y1(t),y2(t),y3(t))/f1(y1(y5(t)),y2(y5(t)),y3(y5(t)))    
+C  y6'(t) = H(t-t1) f2(y2(t),y3(t))/f2(y2(y6(t)),y3(y6(t)))                    
+C
+C  Integration interval: [0,300]                                               
+C
+C  Involved functions and parameters:
+C  H(x): Heaviside function  ( H(x)=0 if x<0, H(x)=1 if x>=1)
+C  f1(x,y,w) = x y + w
+C  f2(y,w) = 10^(-12) + y + w
+C  alpha = 1.8
+C  beta = 20
+C  gamma = 0.002
+C  r = 5 10^4
+C  s = 10^5
+C  t0 = 32  or 32  or 33  or 34  or 35
+C  t1 = 119 or 111 or 145 or 163 or 197
+C
+C  Initial values and initial functions
+C  y1(t) = 0.75 10^(-4) or 0.5 10^(-4) or 0.1 10^(-4) or 0.75 10^(-5) or
+C          0.5 10^(-5)    for t <= 0
+C  y2(t) = 10^(-15)       for t <= 0
+C  y3(t) = 0              for t <= 0
+C  y4(t) = 0              for t <= 0
+C  y5(t) = 0              for t <= 0
+C  y6(t) = 0              for t <= 0
+C  
+------------------------------------------------------------------------------

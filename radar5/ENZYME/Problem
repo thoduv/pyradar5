@@ -1,0 +1,27 @@
+C
+------------------------------------------------------------------------
+C     4D Enzyme kinetics with an inhibitor molecule, from 
+C     Solving ordinary differential equations,
+C     E. Hairer, S.P. Norsett and G. Wanner 
+C     Springer Series in Computational Mathematics 8                    
+C
+C     y1'(t) = a - y1(t) u(y4(t-tau))  
+C     y2'(t) = u(y4(t-tau)) y1(t) - y2(t) 
+C     y3'(t) = y2(t) - y3(t)      
+C     y4'(t) = y3(t) - b y4(t)  
+C
+C  Integration interval: [0,160]
+C
+C  Involved functions and parameters:
+C  u(x) = 1 / (1 + 0.0005 x^3)                               
+C  a = 10.5
+C  b = 0.5
+C  tau = 4
+C
+C  Initial values and initial functions
+C  y1(t) = 60                   for  t = 0
+C  y2(t) = 10                   for  t = 0
+C  y3(t) = 10                   for  t = 0
+C  y4(t) = 20                   for  -tau <= t <= 0
+C  
+------------------------------------------------------------------------

@@ -1,0 +1,90 @@
+------------------------------------------------------------------------------
+C  Acute hepatitis B virus infection, from:
+C  Numerical solution by LMMs of stiff delay differential systems modeling
+C  an immune response,
+C  G. Bocharov, G. Marchuk and A. Romanyukha                              
+C  Numerische Mathematik, vol. 73, 1996, pp 131--148                           
+C                                                                              
+C  y1'(t) = a1 y2(t) + a2 a3 y2(t) y7(t) - a4 y1(t) y10(t) - a5 y1(t) -
+C         - a6 y1(t) (a7 - y2(t) - y3(t))
+C  y2'(t) = a8 y1(t) (a7 - y2(t) - y3(t)) - a3 y2(t) y7(t) - a9 y2(t)           
+C  y3'(t) = a3 y2(t) y7(t) + a9 y2(t) - a10 y3(t)                              
+C  y4'(t) = a11 a12 y1(t) - a13 y4(t) 
+C  y5'(t) = a14 (f1(y3(t)) a15 y4(t-tau1) y5(t-tau1) - y4(t) y5(t)) -   
+C         - a16 y4(t) y5(t) y7(t) + a17 (a18 - y5(t))
+C  y6'(t) = a19 (f1(y3(t)) a20 y4(t-tau2) y6(t-tau2) - y4(t) y6(t)) -
+C         - a21 y4(t) y6(t) y8(t) + a22 (a23 - y6(t)) 
+C  y7'(t) = a24 (f1(y3(t)) a25 y4(t-tau3) y5(t-tau3) y7(t-tau3) - 
+C         - y4(t) y5(t) y7(t)) - a26 y2(t) y7(t) + a27 (a28 - y7(t))
+C  y8'(t) = a29 (f1(y3(t)) a30 y4(t-tau4) y6(t-tau4) y8(t-tau4) -
+C         - y4(t) y6(t) y8(t)) + a31 (a32 - y8(t))
+C  y9'(t) = a33 f1(y3(t)) a34 y4(t-tau5) y6(t-tau5) y8(t-tau5) +
+C         + a35 (a36 - y9(t))
+C  y10'(t)= a37 y9(t) - a38 y10(t) y1(t) - a39 y10(t)
+C
+C
+C  Integration interval: [0,130]                                               
+C
+C  Involved functions and parameters:
+C  f1(x) = 1 - y3(t)/a7
+C 
+C  a1 = 83.0
+C  a2 = 5.0
+C  a3 = 6.6 10^14
+C  a4 = 3.0 10^11
+C  a5 = 0.4
+C  a6 = 2.5 10^7
+C  a7 = 0.5 10^(-12)
+C  a8 = 2.3 10^9
+C  a9 = 0.052
+C  a10 = 0.15
+C  a11 = 9.4 10^9
+C  a12 = 1.0 10^(-15)
+C  a13 = 1.2
+C  a14 = 2.7 10^16
+C  a15 = 2.0
+C  a16 = 5.3 10^27
+C  a17 = 1.0
+C  a18 = 1.0 10^(-18)
+C  a19 = 2.7 10^16
+C  a20 = 2.0
+C  a21 = 8.0 10^28
+C  a22 = 1.0
+C  a23 = 1.0 10^(-19)
+C  a24 = 5.3 10^33
+C  a25 = 16.0
+C  a26 = 1.6 10^14
+C  a27 = 0.4 
+C  a28 = 1.0 10^(-18)
+C  a29 = 8.0 10^32
+C  a30 = 16.0
+C  a31 = 0.1
+C  a32 = 1.0 10^(-18)
+C  a33 = 1.7 10^30
+C  a34 = 3.0
+C  a35 = 0.4
+C  a36 = 4.3 10^(-22)
+C  a37 = 0.85 10^7
+C  a38 = 8.6 10^11
+C  a39 = 0.043
+C  tau1 = 0.6
+C  tau2 = 0.6
+C  tau3 = 2.0
+C  tau4 = 2.0
+C  tau5 = 3.0
+C
+C
+C
+C  Initial values and initial functions
+C  y1(t) = 2.9 10^(-16)   for t <= 0
+C  y2(t) = 0              for t <= 0
+C  y3(t) = 0              for t <= 0
+C  y4(t) = 0              for t <= 0
+C  y5(t) = a18            for t <= 0
+C  y6(t) = a23            for t <= 0
+C  y7(t) = a28            for t <= 0
+C  y8(t) = a32            for t <= 0
+C  y9(t) = a36            for t <= 0
+C  y10(t)= a37 a36/a39    for t <= 0
+C  
+------------------------------------------------------------------------------

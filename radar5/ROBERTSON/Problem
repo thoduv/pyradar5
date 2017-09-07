@@ -1,0 +1,25 @@
+------------------------------------------------------------------------------
+C  Delayed Robertson problem, from:
+C  Implementing Radau IIA methods for stiff delay equations
+C  N. Guglielmi and E. Hairer
+C  2000, preprint (www.unige.ch/math/folks/hairer/preprints.html)
+C  
+C                                                                              
+C  y1'(t) = -a y1(t) + b y2(t-tau) y3(t) 
+C  y2'(t) =  a y1(t) - b y2(t-tau) y3(t) - c y2(t)^2
+C  y3'(t) =  c y2(t)^2
+C
+C  Integration interval: [0,10^10]
+C
+C  Involved functions and parameters:
+C  a =  4.0 10^(-2)
+C  b =  10^4
+C  c =  3.0 10^7
+C  tau = 10^(-2)
+C  
+C  Initial values and initial functions
+C  y1(t) = 1.0                  for   t = 0
+C  y2(t) = 0.0                  for  -tau <= t <= 0
+C  y3(t) = 0.0                  for   t = 0
+C  
+------------------------------------------------------------------------------

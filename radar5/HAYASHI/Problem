@@ -1,0 +1,23 @@
+------------------------------------------------------------------------------
+C  Nearly singular state dependent neutral problem, from:
+C  Numerical solution of retarded and neutral delay differential equations
+C  using continuous Runge-Kutta methods
+C  H. Hayashi 
+C  PhD dissertation, University of Toronto, 1996.
+C                                                                              
+C  y'(t) = cos(t) (1 + y(t y(t)^2)) + a y(t) y'(t y(t)^2) +
+C        + (1 - a) sin(t) cos(t sin(t)^2) - sin(t + t sin(t)^2)
+C
+C  Integration interval: [0,pi]
+C
+C  Involved functions and parameters:
+C  a =  0.9
+C  pi = 3.1415926535897932385
+C  
+C  Initial values and initial functions
+C  y(t) = 0                    for  t = 0
+C  y'(t)= 1                    for  t = 1
+C  Initial functions are not required.
+C  
+C  Exact (global) solution: y(t) = sin(t)
+------------------------------------------------------------------------------

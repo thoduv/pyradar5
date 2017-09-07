@@ -1,0 +1,19 @@
+------------------------------------------------------------------------------
+C  State dependent neutral problem, from:
+C  A first order method for differential equations of neutral type        
+C  R. Castleton and L. Grimm
+C  Math. Comp. vol. 27, pp 571--577, 1973.  
+C                                                                              
+C  y'(t) = cos(t) (1 + y(t y(t)^2)) + a y(t) y'(t y(t)^2) 
+C
+C  Integration interval: [0.25,5]
+C
+C  Involved functions and parameters:
+C  a =  0.6
+C  
+C  Initial values and initial functions
+C  y(t) = -t/2                 for  t <= 0.25
+C  y'(t)= -1/2                    for  t <= 0.25
+C  Initial functions are not required.
+C  
+------------------------------------------------------------------------------

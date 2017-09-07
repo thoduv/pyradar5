@@ -1,0 +1,21 @@
+------------------------------------------------------------------------------
+C  Non smooth artificial problem, from:
+C  Implementing Radau IIA methods for stiff delay differential equations
+C  N. Guglielmi and E. Hairer
+C  2000, preprint
+C                                                                              
+C  y'(t) = 1/(1 + t^2) - (y(t) - (b/a) y(t-tau) - ((a - b)/a) pi/2)/eps 
+C
+C  Integration interval: [0,100.5]
+C
+C  Involved functions and parameters:
+C  a =  5.0
+C  b = -4.0
+C  tau = 1
+C  eps = 10^(-6)
+C  pi = 3.1415926535897932385
+C  
+C  Initial values and initial functions
+C  y(t) = arctan(t)            for  -1 <= t <= 0
+C  
+------------------------------------------------------------------------------

@@ -1,0 +1,25 @@
+C
+------------------------------------------------------------------------
+C     3D Gause-type predator-pray model                   
+C     On neutral delay logistic {G}ause-type predator-prey systems
+C     Y. Kuang 
+C     Dynam. Stability Systems, vol. 6, pp. 173--189, 1991
+C
+C     y1'(t) = y1(t) (1 - y1(t-tau ) - rho y3(t-\tau ) - y2(t) F(y1(t))
+C     y2'(t) = y2(t) (F(y1(t)) - alpha)
+C       0    = y1(t) (1 - y1(t-tau) - rho y3(t-\tau)) - y2(t) F(y1(t)) - y3(t)
+C
+C  Integration interval: [0,30]
+C
+C  Involved functions and parameters:
+C  F(x) = x^2 / (1 + x^2)                               
+C  rho =   2.9
+C  alpha = 0.1
+C  tau = 0.42
+C
+C  Initial values and initial functions
+C  y1(t) = 0.33 - t/10          for  t = 0
+C  y2(t) = 2.22 + t/10          for  t = 0
+C  y3(t) = -1/10                for  t = 0
+C  
+------------------------------------------------------------------------

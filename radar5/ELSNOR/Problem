@@ -1,0 +1,19 @@
+------------------------------------------------------------------------------
+C  Non smooth artificial state dependent equation, from:
+C  Introduction to the theory and applications of differential equations
+C  with deviating arguments.
+C  L.E. Elsgolts and S.B. Norkin
+C                                                                              
+C  y'(t) = - y(alpha(t,y(t))) + 5
+C  alpha(t,y) = t -2 - y^2
+C
+C  Integration interval: [0,2]
+C
+C  Involved functions and parameters:
+C  
+C  Initial values and initial functions
+C  y(t) =  4.5            for   t <= -1
+C  y(t) = -0.5            for  -1 <= t <= 0
+C  
+C  Remark: the true solution terminates at t=125/121.
+------------------------------------------------------------------------------
