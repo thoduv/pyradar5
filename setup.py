@@ -1,12 +1,46 @@
-from distutils.core import setup, Extension
+# -*- coding: utf-8 -*-
+from distutils.util import get_platform
+from numpy.distutils.core import setup
+from numpy.distutils.misc_util import Configuration
+from os import chdir, getcwd, system
 
-module1 = Extension('radar5',
-                    sources = ['wrapper.c'],
-                    extra_objects = ['radar5/radar5.so', 'radar5/dc_decdel.so','radar5/decsol.so' ,'radar5/contr5.so'] +
-                    ['tcc/'+x for x in ['libtcc.o', 'tccpp.o', 'tccgen.o', 'tccelf.o', 'tccasm.o', 'tccrun.o', 'x86_64-gen.o', 'x86_64-link.o', 'i386-asm.o']],
-                    libraries = ['gfortran','m','gsl', 'blas', 'lapack'])
+with open("README.md", "r") as fh:
+    long_description = fh.read()
 
-setup (name = 'radar5',
-       version = '1.0',
-       description = 'RADAR5 DDE Solver Wrapper',
-       ext_modules = [module1])
+    
+config = Configuration('radar5', '', None)
+
+prev = getcwd()
+if 'win' in get_platform():
+	chdir('tcc\\win32\\')
+	system('build.bat')
+else:
+	chdir('tcc')
+	system('./configure')
+chdir(prev)
+
+config.add_library('radar5f', sources=['radar5/radar5.f', 'radar5/dc_decdel.f','radar5/decsol.f' ,'radar5/contr5.f'])
+
+config.add_extension('radar5',
+                    sources = ['wrapper.c',
+			       'tcc/libtcc.c'],
+                    extra_compile_args = ['-Ofast'],
+                    libraries = ['m','gsl', 'blas', 'lapack', 'radar5f'])
+
+config.dict_append(version= '1.0',
+		    author= u'Aurélien Thorette',
+		    author_email='thoduv@free.fr',
+		    description = 'RADAR5 DDE Solver Wrapper',
+		    long_description=long_description,
+		    long_description_content_type="text/markdown",
+		    classifiers=[
+	"Topic :: Scientific/Engineering",
+	"Programming Language :: Python :: 3",
+	"Programming Language :: Python :: 2",
+	"Programming Language :: Python :: Implementation :: CPython",
+        "License :: OSI Approved :: LGPL License",
+        "Operating System :: Microsoft :: Windows",
+        "Operating System :: POSIX"
+    ])
+
+setup(**config.todict())

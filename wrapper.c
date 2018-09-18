@@ -49,18 +49,27 @@ struct params_
 {
 	PyObject_HEAD
 	
+	int full_output;
+	int xpos;
+	double *xvalues;
+	int xvalues_len;
+	
 	double *array;
 	unsigned int array_size;
 	unsigned int array_pos;
 	unsigned int array_incr;
+	
+	
 	PyObject *py_fcn;
 	equ_c_t c_fcn;
+	
 	PyObject *py_y0[10];
 	double constant_y0[10];
 	PyObject *py_lagfuns[10];
 	lag_c_t c_lagfuns[10];
 	double constant_lags[10];
 	PyThreadState *_thead_save;
+	int interactive;
 	int fail;
 	void *user_params;
 	
@@ -72,8 +81,9 @@ struct params_
 	double y0_t0;
 	
 	_lag_ctx *lag_ctx;
+	
+	params_t *next, *prev;
 };
-
 
 static double _lag_c(int il, int ip, _lag_ctx *ctx)
 {
@@ -110,6 +120,9 @@ static void FCN(int *N, double *X, double *Y, double *F, ARGLAG_t ARGLAG, PHI_t 
 		return;
 	}
 	
+	if(p->fail)
+		return;
+	
 	/* If it's a Python function, then we have to tell Python we're going to maybe modify things. */
 	PyEval_RestoreThread(p->_thead_save);
 	
@@ -126,18 +139,25 @@ static void FCN(int *N, double *X, double *Y, double *F, ARGLAG_t ARGLAG, PHI_t 
 	else
 		ret = PyObject_CallFunctionObjArgs(p->py_fcn, y_array, PyFloat_FromDouble(*X), p->py_lag_callback, NULL);
 	
-	if(PyErr_Occurred())
+	if(!ret)
 	{
 		PyErr_Print();
+		Py_DECREF(y_array);
 		p->_thead_save = PyEval_SaveThread();
 		p->fail = 1;
-		Py_DECREF(y_array);
 		return;
 	}
 	
 	Py_DECREF(y_array);
 	
 	PyObject *seq = PySequence_Fast(ret, "Equation must return a sequence !");
+	if(!seq)
+	{
+		p->_thead_save = PyEval_SaveThread();
+		p->fail = 1;
+		return;
+	}
+	
 	int len = PySequence_Size(ret);
 	
 	if(len != *N)
@@ -240,54 +260,115 @@ static void JACLAG(int *N, double *X, double *Y, int *DFYL, ARGLAG_t ARGLAG, PHI
 
 static void SOLOUT(int *NR, double *XOLD, double *X, double *HSOL, double *Y, double *CONT, int *LRC, int *N, double *RPAR, int *IPAR, int *IRTRN)
 {   
+    int i;
     params_t *p = (params_t*)IPAR;
     
+    if(p->interactive)
+    {
+        if(PyErr_CheckSignals())
+        {
+            p->fail = 1;
+        }
+    }
+      
     if(p->fail)
     {
         *IRTRN = -1;
         return;
-    }
+    } 
     
 //   fprintf(stderr,"h=%g, dx=%g\n",*HSOL,*X-*XOLD);
 //     fprintf(stderr,"SOLOUT %f %f / %p %d %d %d\n",*X,*Y, p->array,p->array_size,p->array_pos,p->array_incr);
     
-    if(p->array_size == p->array_pos)
-    {
-        p->array_size += p->array_incr;
-//         fprintf(stderr,"realloc %d->%d (%i)", p->array_size - p->array_incr, p->array_size , p->array_size*(*N+1)*sizeof(double));
-        double *new_array = realloc(p->array, p->array_size*(*N+1)*sizeof(double));
-        if(new_array == NULL)
-        {
-                *IRTRN = -1;
-                return;
-        }
-//         fprintf(stderr," -> %p\n", new_array);
-        p->array = new_array;
+    if(p->xvalues)
+    {    
+	    if(*NR == 1)
+	    {
+		double *ptr = p->array + p->array_pos * (*N+1);
+		ptr[0] = *X;
+	
+		for(i = 0; i < *N; i++)
+		{
+			ptr[i + 1] = Y[i]; 
+		}
+		
+		p->array_pos += 1;
+		p->xpos += 1;
+	    }
+	    
+	    double next_x = p->xvalues[p->xpos];
+	    
+	    while(*X >= next_x && p->xpos < p->xvalues_len)
+	    {
+		if(p->array_size == p->array_pos)
+		{
+			p->array_size += p->array_incr;
+		//         fprintf(stderr,"realloc %d->%d (%i)", p->array_size - p->array_incr, p->array_size , p->array_size*(*N+1)*sizeof(double));
+			double *new_array = realloc(p->array, p->array_size*(*N+1)*sizeof(double));
+			if(new_array == NULL)
+			{
+				p->fail = 2;
+				*IRTRN = -1;
+				return;
+			}
+		//         fprintf(stderr," -> %p\n", new_array);
+			p->array = new_array;
+		}    
+		
+		double *ptr = p->array + p->array_pos * (*N+1);
+		ptr[0] = next_x;
+	
+		for(i = 1; i < *N + 1; i++)
+		{
+			ptr[i] = contr5_(&i, N, &next_x, CONT, X, HSOL);
+		}
+		
+		p->array_pos += 1;
+		p->xpos += 1;
+		next_x = p->xvalues[p->xpos];
+	    }
     }
     
-
-    int i;
-    
-    double *ptr = p->array + p->array_pos * (*N+1);
-    
-    ptr[0] = *X;
-    
-    for(i = 0; i < *N; i++)
+        
+    if(p->full_output)
     {
-        ptr[i+1] = Y[i]; 
+	if(p->array_size == p->array_pos)
+	{
+		p->array_size += p->array_incr;
+	//         fprintf(stderr,"realloc %d->%d (%i)", p->array_size - p->array_incr, p->array_size , p->array_size*(*N+1)*sizeof(double));
+		double *new_array = realloc(p->array, p->array_size*(*N+1)*sizeof(double));
+		if(new_array == NULL)
+		{
+			p->fail = 2;
+			*IRTRN = -1;
+			return;
+		}
+	//         fprintf(stderr," -> %p\n", new_array);
+		p->array = new_array;
+	}	    
+	    
+	double *ptr = p->array + p->array_pos * (*N+1);
+	ptr[0] = *X;
+	
+	for(i = 0; i < *N; i++)
+	{
+		ptr[i+1] = Y[i]; 
+	}
+	
+	p->array_pos += 1;
     }
-    
-    p->array_pos += 1;
 }
 
 void _tcc_error(void *opaque, const char *msg)
 {
-	PySys_WriteStderr("! %s\n", msg);
+	PyErr_SetString(PyExc_RuntimeError, msg);
+	//PySys_WriteStderr("! %s\n", msg);
 }
 
 
-// radar5(equ,y0,xend,[rpar],grid=grid)
+// radar5(equ,y0,xend,[rpar],grid=grid)  
 
+static params_t *current_p = NULL;
 
 static PyMethodDef py_lag_def = {"lag", _lag_py, METH_VARARGS, "Returns delayed values of variables inside right-hand-side function."};
 
@@ -297,11 +378,40 @@ static PyObject *radar5_radar5(PyObject *self, PyObject *args,PyObject *keywds)
 	int verbose = 0;
 	int NGRID = 200;
 	double XEND = 100;
-	int N = 1;
-
+	int N = 0;
+        int MXST = 4*16384;
 	params_t par;
 	params_t *p = &par;
 	int *IPAR = (void*)p;
+	
+	double X = 0;
+	double *Y = NULL;
+
+	double H = 1e-6;
+	double RTOL = 1e-6;
+	double ATOL = RTOL;
+	double ITOL = 0;
+	int IJAC = 0;
+	int MLJAC = N;
+	int MUJAC = 0; // not needed
+	int NLAGS = 0;
+	int NJACL = 0;
+	int IMAS = 0;
+	int IOUT = verbose ? 1 : 3;
+	double WORK[30];
+	int IWORK[30];
+	double *RPAR = NULL;
+
+	int IDID = 0;
+
+	int *IPAST = NULL;
+	int DUMMY;
+	int MLMAS = N;
+	int MUMAS = 0; // not needed
+	
+	int RPAR_len = 0;
+	
+	double *GRID = NULL;
 	
 	memset(p,0,sizeof(params_t));
 	
@@ -312,23 +422,65 @@ static PyObject *radar5_radar5(PyObject *self, PyObject *args,PyObject *keywds)
 	PyObject* lagfuns_obj=NULL; 
 	PyObject* equ_obj=NULL;
 	PyObject* y0_obj=NULL;
+	PyObject* xend_obj=NULL;
+	
+	
+	int full_output_flag = -1;
+	
+	PyObject *py_p = NULL;
 	
 	PyObject* seq;
 	int len;
 
-	/* Parse arguments */
-	static char *kwlist[] = {   "equ", "y0", "xend", "rpar", "ngrid", "lagvars", "lags", "verbose", NULL};
+#ifdef WITH_TCC
+	TCCState *tcc = NULL;
+#endif	
 	
-	if (!PyArg_ParseTupleAndKeywords(args, keywds, "OOd|OiOOi", kwlist, &equ_obj, &y0_obj, &XEND, &rpar_obj, &NGRID, &lagvars_obj, &lagfuns_obj, &verbose))
+	/* Parse arguments */
+	static char *kwlist[] = {   "equ", "y0", "xend", "rpar", "ngrid", "lagvars", "lags", "verbose", "mxst", "full_output", NULL};
+	
+	if (!PyArg_ParseTupleAndKeywords(args, keywds, "OOO|OiOOiii", kwlist, &equ_obj, &y0_obj, &xend_obj, &rpar_obj, &NGRID, &lagvars_obj, &lagfuns_obj, &verbose, &MXST,&full_output_flag))
 		return NULL;
         
 	if(verbose) PySys_WriteStderr("RADAR5 wrapper (verbose = %d)\n", verbose);
 
+	
+	/* SPECIFIED X VALUES OR XEND */
+	if(xend_obj)
+	{
+		PyArrayObject *xvalues = (PyArrayObject*)PyArray_ContiguousFromAny(xend_obj, NPY_DOUBLE, 0, 1);
+		if(xvalues == NULL)
+		{
+			PyErr_SetString(PyExc_ValueError, "Cannot parse x values.");
+			goto cleanup;
+		}
+		
+		p->full_output = full_output_flag == 1 ? 1 : 0;	/* Full output only if specified... */
+		
+		if(full_output_flag != 1 && PyArray_SIZE(xvalues) == 1)	/* ...or if a single value if given for X */
+		{
+			p->xvalues = NULL;
+			p->full_output = 1;
+			XEND = *(double*)PyArray_GETPTR1(xvalues, 0);
+			if(verbose) PySys_WriteStderr("Full output up to X=%g (all points)\n", XEND);
+		}
+		else
+		{
+			p->xvalues = (double*)PyArray_GETPTR1(xvalues, 0);
+			p->xvalues_len = PyArray_DIM(xvalues, 0);
+			p->xpos = 0;
+			XEND = p->xvalues[p->xvalues_len - 1];
+			if(verbose) PySys_WriteStderr("%s output up to X=%g (%d points)\n", p->full_output ? "Full" : "User-specified", XEND, p->xvalues_len);
+		}
+	}
+	
 	/* LOADING INITIAL VALUES : */
 	
 	if(y0_obj)
 	{
 		seq = PySequence_Fast(y0_obj, "Initial values must be provided as a sequence.");
+		if(!seq)
+			return NULL;
 		len = PySequence_Size(y0_obj);
 
 		if(len == 2)
@@ -382,10 +534,15 @@ static PyObject *radar5_radar5(PyObject *self, PyObject *args,PyObject *keywds)
 				Py_DECREF(values_array);
 			}
 		}
-		else if(PySequence_Check(PySequence_Fast_GET_ITEM(seq, 0)))
+		else if(len > 0 && PySequence_Check(PySequence_Fast_GET_ITEM(seq, 0)))
 		{
 			/* Looks like a 2D array : time data might be its first row. This is useful to "continue" an integration, because it's the integrator output format. */
 			PyArrayObject *full_array = (PyArrayObject*)PyArray_ContiguousFromAny(y0_obj, NPY_DOUBLE, 2, 2);
+			if(PyErr_Occurred())
+			{
+				Py_DECREF(seq);
+				goto cleanup;
+			}
 			
 			int y0_len = PyArray_DIM(full_array, 0);
 			N = PyArray_DIM(full_array, 1) - 1;
@@ -434,6 +591,11 @@ static PyObject *radar5_radar5(PyObject *self, PyObject *args,PyObject *keywds)
 				else
 				{
 					double y0 = PyFloat_AsDouble(item);
+					if(PyErr_Occurred())
+					{
+						Py_DECREF(seq);
+						goto cleanup;
+					}
 					p->constant_y0[i] = y0;
 					p->py_y0[i] = NULL;
 					if(verbose) PySys_WriteStderr("Initial value: y[%d](t<0) = %f (constant)\n", i, y0);
@@ -446,40 +608,16 @@ static PyObject *radar5_radar5(PyObject *self, PyObject *args,PyObject *keywds)
 		Py_DECREF(seq);
 	}
 	
+	if(N == 0)
+	{
+		PyErr_SetString(PyExc_ValueError, "Could not guess system dimension from initial values.");
+		goto cleanup;
+	}
+	
 	if(verbose) PySys_WriteStderr("System dimension: N = %d\n", N);
-
-#ifdef WITH_TCC
-	TCCState *tcc = NULL;
-#endif
 	
-	
-	double X = 0;
-	double Y[N];
-
-	double H = 1e-6;
-	double RTOL = 1e-6;
-	double ATOL = RTOL;
-	double ITOL = 0;
-        int MXST = 4096;
-	int IJAC = 0;
-	int MLJAC = N;
-	int MUJAC;
-	int NLAGS = 0;
-	int NJACL = 0;
-	int IMAS = 0;
-	int IOUT = verbose ? 1 : 3;
-	double WORK[30];
-	int IWORK[30];
-	double *RPAR = NULL;
-
-	int IDID;
-
-	int IPAST[N];
-	int DUMMY;
-	int MLMAS = N;
-	int MUMAS;
-	
-	int RPAR_len = 0;
+	Y = (double*)malloc(N * sizeof(double));
+	IPAST = (int*)malloc(N * sizeof(int));
 
 	/* Set all integrator parameters to default values. */
 	for(i = 0; i < 30; i++)
@@ -492,6 +630,7 @@ static PyObject *radar5_radar5(PyObject *self, PyObject *args,PyObject *keywds)
 	if(rpar_obj)
 	{
 		seq = PySequence_Fast(rpar_obj, "Constant parameters must be provided as a sequence.");
+		if(!seq) goto cleanup;
 		RPAR_len = PySequence_Size(rpar_obj);
 		
 		RPAR = malloc(sizeof(double) * RPAR_len);
@@ -508,11 +647,19 @@ static PyObject *radar5_radar5(PyObject *self, PyObject *args,PyObject *keywds)
 	if(lagvars_obj)
 	{
 		seq = PySequence_Fast(lagvars_obj, "Delayed variables must be provided as a sequence.");
+		if(!seq) goto cleanup;
 		len = PySequence_Size(lagvars_obj);
 
 		for (i = 0; i < len; i++) {
 			PyObject *item = PySequence_Fast_GET_ITEM(seq, i);
 			int lagparam = PyLong_AsLong(item);
+			
+			if(lagparam < 0 || lagparam >= N)
+			{
+				PyErr_SetString(PyExc_ValueError, "Invalid lag parameter");
+				Py_DECREF(seq);
+				goto cleanup;
+			}
 			
 			IPAST[i]=lagparam+1;
 			
@@ -527,6 +674,7 @@ static PyObject *radar5_radar5(PyObject *self, PyObject *args,PyObject *keywds)
 	if(lagfuns_obj)
 	{
 		seq = PySequence_Fast(lagfuns_obj, "Lags must be provided as a sequence.");
+		if(!seq) goto cleanup;
 		len = PySequence_Size(lagfuns_obj);
 
 		for (i = 0; i < len; i++) {
@@ -564,21 +712,26 @@ static PyObject *radar5_radar5(PyObject *self, PyObject *args,PyObject *keywds)
 	}
 	
 	
-	double GRID[NGRID];
+	GRID = malloc(sizeof(double) * (NGRID + 1));
 			
 	
-	p->array_size = NGRID;    // taille initiale
+	if(p->xvalues)
+	{
+		p->array_size = p->xvalues_len;
+	}
+	else
+	{
+		p->array_size = NGRID;    // taille initiale
+	}
 	
 	double *initial_array = malloc(p->array_size*(N+1)*sizeof(double));
 	if(verbose) PySys_WriteStderr("Allocate initial array (size %gkB) at %p\n", p->array_size*(N+1.)*sizeof(double)/1024, initial_array);
 	
 	p->array =  initial_array;
 	p->array_pos = 0;
-	p->array_incr = 512*1024;    // increment taille
+	p->array_incr = p->array_size / 4;    // increment taille
 	
 	p->user_params = RPAR;
-    	
-	PyObject *py_p = NULL;
 	
 	/* Set RHS function, either Python or C. */
 	if(PyCallable_Check(equ_obj))
@@ -640,22 +793,22 @@ static PyObject *radar5_radar5(PyObject *self, PyObject *args,PyObject *keywds)
 		char *source = malloc(PyBytes_Size(str) + nsymbols * 128 + 128);
 		
 		/* This one can be useful too. */
-		sprintf(source, "#define M_PI 3.14159265358979323846\n");
+		int pos = sprintf(source, "#define M_PI 3.14159265358979323846\n");
 		
 		for(i = 0; i < nsymbols; i++)
-			sprintf(source, "%sdouble %s(double);", source, symbols[i].name);
+			pos += sprintf(source + pos, "double %s(double);", symbols[i].name);
 
-		sprintf(source, "%s\n%s", source, PyBytes_AsString(str));
+		sprintf(source + pos, "\n%s", PyBytes_AsString(str));
 		
 		/* Compile the code snippet */
 		int result = tcc_compile_string(tcc, source);
 		if(result < 0)
 		{
-			PyErr_SetString(PyExc_RuntimeError, "Equation could not be compiled.");
+			free(source);
 			goto cleanup;
 		}
 		
-		Py_DECREF(str);
+		//Py_DECREF(str);
 		free(source);
 		
 		/* Add math symbols for the linking step. */
@@ -666,12 +819,26 @@ static PyObject *radar5_radar5(PyObject *self, PyObject *args,PyObject *keywds)
 		result = tcc_relocate(tcc, TCC_RELOCATE_AUTO);
 		if(result < 0)
 		{
-			PyErr_SetString(PyExc_RuntimeError, "Equation could not be compiled (relocation error).");
+// 			PyErr_SetString(PyExc_RuntimeError, "Equation could not be compiled (relocation error).");
 			goto cleanup;
 		}
 		
 		p->py_fcn = NULL;
 		p->c_fcn = tcc_get_symbol(tcc, "equation");		/* Get pointer to the compiled function */
+		
+		if(!p->c_fcn)
+		{
+			p->c_fcn = tcc_get_symbol(tcc, "y");
+			if(!p->c_fcn)
+			{
+				p->c_fcn = tcc_get_symbol(tcc, "rhs");
+				if(!p->c_fcn)
+				{
+					PyErr_SetString(PyExc_ValueError, "No function named 'equation', 'y' or 'rhs' in provided C code.");
+					goto cleanup;
+				}
+			}
+		}
 		
 		if(verbose) PySys_WriteStderr("Equation successfully compiled : %p\n", p->c_fcn);
 #else
@@ -687,14 +854,14 @@ static PyObject *radar5_radar5(PyObject *self, PyObject *args,PyObject *keywds)
 	}
         
 	p->fail = 0;
-
+	p->interactive = 0;
 	
 	IWORK[13] = 1;      //  ne pas utiliser JACLAG
 	
 	/* NOTE: Black magic... */
 	IWORK[12] = NGRID;      //  WORKSPACE FOR GRID
 	
-	MXST = 4*16384*IWORK[14]; //MAX(NGRID*IWORK[14],8192); // pourquoi c'était divisé par /N ?
+//	MXST = 1024*1024*32; //4*16384*IWORK[14]; //MAX(NGRID*IWORK[14],8192); // pourquoi c'était divisé par /N ?
 	IWORK[11] = MXST;       // WORKSPACE FOR PAST 
 	
 	IWORK[1] = INT_MAX;
@@ -714,9 +881,14 @@ static PyObject *radar5_radar5(PyObject *self, PyObject *args,PyObject *keywds)
 
 	/* MAIN CALL TO THE INTEGRATOR */
 	
-	p->_thead_save = PyEval_SaveThread();	/* Promise Python that we are not going to mess with any of its data. */
-											/* This allows other threads/event loops to run during the integration. */
-											
+	if(!p->interactive)
+	{
+		p->_thead_save = PyEval_SaveThread();	/* Promise Python that we are not going to mess with any of its data. */
+							/* This allows other threads/event loops to run during the integration. */
+	}
+
+	current_p = p;
+	
 	radar5_(&N,FCN,PHI,ARGLAG,&X,Y,&XEND,&H, \
 					&RTOL,&ATOL,&ITOL, \
 					JFCN,&IJAC,&MLJAC,&MUJAC, \
@@ -725,9 +897,19 @@ static PyObject *radar5_radar5(PyObject *self, PyObject *args,PyObject *keywds)
 					WORK,IWORK,RPAR,IPAR,&IDID, \
 					GRID,IPAST,&DUMMY,&MLMAS,&MUMAS);
 
-	PyEval_RestoreThread(p->_thead_save);
+	current_p = NULL;
+	
+	if(!p->interactive)
+	{
+		PyEval_RestoreThread(p->_thead_save);
+	}
 	
 	/* DONE ! */
+	
+	if(p->fail == 2)
+	{
+		PyErr_SetString(PyExc_MemoryError, "Cannot grow output array.");
+	}
 	
 	if(verbose)
 	{
@@ -756,13 +938,15 @@ static PyObject *radar5_radar5(PyObject *self, PyObject *args,PyObject *keywds)
 #else
 	((PyArrayObject*)output_array)->flags |= NPY_OWNDATA;
 #endif
-
+ 
 	
 	/* CLEANUP : */
 cleanup:
 
-	if(RPAR)
-		free(RPAR);
+	if(RPAR) free(RPAR);
+	if(Y) free(Y);
+	if(IPAST) free(IPAST);
+	if(GRID) free(GRID);
 	
 	if(p->y0_spline)
 	{
@@ -788,7 +972,10 @@ cleanup:
 	
 	if(p->py_rpar)
 		Py_DECREF(p->py_rpar);
-		
+	
+	if(p->xvalues)
+		Py_DECREF(p->xvalues);
+	
 #ifdef WITH_TCC
 	if(tcc)
 		tcc_delete(tcc);
@@ -796,6 +983,16 @@ cleanup:
 
 	return output_array;
 }
+
+static PyObject *radar5_stop(PyObject *self, PyObject *args)
+{    
+	if(current_p)
+	{
+		current_p->fail = 1;
+	}
+	Py_RETURN_NONE;
+}
+
 
 PyDoc_STRVAR(radar5_doc,
     "radar5(equ, y0, xend, rpar=[], ngrid=200, lagvars=[], lags=[], verbose=False)\n"
@@ -813,13 +1010,14 @@ PyDoc_STRVAR(radar5_doc,
     "Parameters\n"
 	"----------\n"
     "equ : function, pointer to a raw c function or string\n"
-	"y0 : iterable\n"
-	"xend : real\n"
+	"y0 : iterable or callable, initial and past values: either constant, or a (time, values) array, or a functions.\n"
+	"xvalues/xend : real or iterable : specified points where the integration should take place\n"
 	"rpar : iterable\n"
 	"ngrid : int\n"
 	"lagvars : iterable\n"
 	"lags : iterable\n"
 	"verbose : bool\n"
+	"full_output : bool\n"
 	"\n"
     "Returns\n"
 	"-------\n"
@@ -827,11 +1025,12 @@ PyDoc_STRVAR(radar5_doc,
 	"\n"
 	"References\n"
 	"----------\n"
-	"[1] N. Guglielmi and E. Hairer, \"Users’ Guide for the code RADAR5 - Version 2.1\", Technical Report, July 2005."
+	"[1] N. Guglielmi and E. Hairer, \"Users' Guide for the code RADAR5 - Version 2.1\", Technical Report, July 2005."
     "\n");
 
 static PyMethodDef Radar5Methods[] = {
     {"radar5",  (PyCFunction)radar5_radar5, METH_VARARGS|METH_KEYWORDS, radar5_doc},
+    {"stop",  (PyCFunction)radar5_stop, METH_VARARGS, "Stop running computation."},
     {NULL, NULL, 0, NULL}        /* Sentinel */
 };
 
