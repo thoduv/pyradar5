@@ -15,6 +15,11 @@
 #define NPY_NO_DEPRECATED_API NPY_1_7_API_VERSION
 #include <numpy/arrayobject.h>
 
+#ifdef _MSC_VER 
+#	define GSL_DLL
+#	define WIN32
+#endif
+
 #include <gsl/gsl_errno.h>
 #include <gsl/gsl_spline.h>
 
@@ -110,6 +115,11 @@ static PyObject *_lag_py(PyObject *self, PyObject *args)
 
 static void FCN(int *N, double *X, double *Y, double *F, ARGLAG_t ARGLAG, PHI_t PHI, double *RPAR, int *IPAR, double *PAST,int *IPAST, int *NRDS)
 {
+	int i, len;
+	PyObject *seq;
+	PyObject *ret;
+	PyObject *y_array;
+	npy_intp dims[1] = {*N};
 	params_t *p = (params_t*)IPAR;
 	_lag_ctx ctx = {X,Y,ARGLAG,PHI,RPAR,IPAR,PAST,IPAST,NRDS,{0,0,0,0,0,0,0,0},{0,0,0,0,0,0,0,0},{0,0,0,0,0,0,0,0}};
 	
@@ -129,11 +139,9 @@ static void FCN(int *N, double *X, double *Y, double *F, ARGLAG_t ARGLAG, PHI_t 
 	p->lag_ctx = &ctx;
 	
 	/* Create an array from Y values */
-	npy_intp dims[1] = {*N};
-	PyObject *y_array = PyArray_SimpleNewFromData(1,dims,NPY_DOUBLE,Y);
+	y_array = PyArray_SimpleNewFromData(1,dims,NPY_DOUBLE,Y);
 		
 	/* Call the function, with following signature : func(Y, X, lagfun, params if any) */
-	PyObject *ret;
 	if(p->py_rpar)
 		ret = PyObject_CallFunctionObjArgs(p->py_fcn, y_array, PyFloat_FromDouble(*X), p->py_lag_callback, p->py_rpar, NULL);
 	else
@@ -150,7 +158,7 @@ static void FCN(int *N, double *X, double *Y, double *F, ARGLAG_t ARGLAG, PHI_t 
 	
 	Py_DECREF(y_array);
 	
-	PyObject *seq = PySequence_Fast(ret, "Equation must return a sequence !");
+	seq = PySequence_Fast(ret, "Equation must return a sequence !");
 	if(!seq)
 	{
 		p->_thead_save = PyEval_SaveThread();
@@ -158,7 +166,7 @@ static void FCN(int *N, double *X, double *Y, double *F, ARGLAG_t ARGLAG, PHI_t 
 		return;
 	}
 	
-	int len = PySequence_Size(ret);
+	len = PySequence_Size(ret);
 	
 	if(len != *N)
 	{
@@ -171,7 +179,6 @@ static void FCN(int *N, double *X, double *Y, double *F, ARGLAG_t ARGLAG, PHI_t 
 	}
 	
 	/* Give the output values to the integrator */
-	int i;
 	for(i = 0; i < *N; i++)
 	{
 		PyObject *item = PySequence_Fast_GET_ITEM(seq, i);
@@ -186,20 +193,22 @@ static void FCN(int *N, double *X, double *Y, double *F, ARGLAG_t ARGLAG, PHI_t 
 
 static double PHI(int *I, double *X, double *RPAR, int *IPAR)
 {
+	PyObject *ret;
 	int i = *I - 1;
 	params_t *p = (params_t*)IPAR;
 	PyObject *fun = p->py_y0[i];
+	double y0;
 	
 	if(fun)
 	{
 		PyEval_RestoreThread(p->_thead_save);
-		PyObject *ret = PyObject_CallFunction(fun, "d", *X);
+		ret = PyObject_CallFunction(fun, "d", *X);
 		p->_thead_save = PyEval_SaveThread();
 		if(!ret || PyErr_Occurred())
 		{
 			PyErr_Print();
 		}
-		double y0 = PyFloat_AsDouble(ret);
+		y0 = PyFloat_AsDouble(ret);
 		Py_DECREF(ret);
 //         fprintf(stderr,"Phi %d: %p -> %f\n", i, fun, y0);
 		return y0;
@@ -217,12 +226,15 @@ static double PHI(int *I, double *X, double *RPAR, int *IPAR)
 
 static double ARGLAG(int *IL, double *X, double *Y,double *RPAR, int *IPAR, PHI_t PHI, double *PAST, int *IPAST, int *NRDS)
 {
+	PyObject *ret;
     int ilag = *IL-1;
     params_t *p = (params_t*)IPAR;
     PyObject *pyfun = p->py_lagfuns[ilag];
+	lag_c_t cfun = p->c_lagfuns[ilag];
+	double r;
+	
     if(!pyfun)
     {
-        lag_c_t cfun = p->c_lagfuns[ilag];
         if(!cfun)
         {
             return *X-p->constant_lags[ilag];
@@ -235,13 +247,14 @@ static double ARGLAG(int *IL, double *X, double *Y,double *RPAR, int *IPAR, PHI_
     else
     {
         PyEval_RestoreThread(p->_thead_save);
-        PyObject *ret = PyObject_CallFunction(pyfun, "dd", *X, *Y);
+        ret = PyObject_CallFunction(pyfun, "dd", *X, *Y);
         p->_thead_save = PyEval_SaveThread();
         if(!ret || PyErr_Occurred())
         {
             PyErr_Print();
         }
-        double r = PyFloat_AsDouble(ret);
+        
+		r = PyFloat_AsDouble(ret);
         Py_DECREF(ret);
 //          fprintf(stderr,"Lag %d: %p -> %f\n", ilag, fun, r);
         return r;
@@ -262,6 +275,9 @@ static void SOLOUT(int *NR, double *XOLD, double *X, double *HSOL, double *Y, do
 {   
     int i;
     params_t *p = (params_t*)IPAR;
+	double *ptr;
+	double *new_array;
+	double next_x;
     
     if(p->interactive)
     {
@@ -284,27 +300,59 @@ static void SOLOUT(int *NR, double *XOLD, double *X, double *HSOL, double *Y, do
     {    
 	    if(*NR == 1)
 	    {
-		double *ptr = p->array + p->array_pos * (*N+1);
-		ptr[0] = *X;
-	
-		for(i = 0; i < *N; i++)
-		{
-			ptr[i + 1] = Y[i]; 
-		}
+			ptr = p->array + p->array_pos * (*N+1);
+			ptr[0] = *X;
 		
-		p->array_pos += 1;
-		p->xpos += 1;
+			for(i = 0; i < *N; i++)
+			{
+				ptr[i + 1] = Y[i]; 
+			}
+			
+			p->array_pos += 1;
+			p->xpos += 1;
 	    }
 	    
-	    double next_x = p->xvalues[p->xpos];
+	    next_x = p->xvalues[p->xpos];
 	    
 	    while(*X >= next_x && p->xpos < p->xvalues_len)
 	    {
+			if(p->array_size == p->array_pos)
+			{
+				p->array_size += p->array_incr;
+			//         fprintf(stderr,"realloc %d->%d (%i)", p->array_size - p->array_incr, p->array_size , p->array_size*(*N+1)*sizeof(double));
+				new_array = PyMem_Realloc(p->array, p->array_size*(*N+1)*sizeof(double));
+				if(new_array == NULL)
+				{
+					p->fail = 2;
+					*IRTRN = -1;
+					return;
+				}
+			//         fprintf(stderr," -> %p\n", new_array);
+				p->array = new_array;
+			}    
+			
+			ptr = p->array + p->array_pos * (*N+1);
+			ptr[0] = next_x;
+		
+			for(i = 1; i < *N + 1; i++)
+			{
+				ptr[i] = contr5_(&i, N, &next_x, CONT, X, HSOL);
+			}
+			
+			p->array_pos += 1;
+			p->xpos += 1;
+			next_x = p->xvalues[p->xpos];
+	    }
+    }
+    
+        
+    if(p->full_output)
+    {
 		if(p->array_size == p->array_pos)
 		{
 			p->array_size += p->array_incr;
 		//         fprintf(stderr,"realloc %d->%d (%i)", p->array_size - p->array_incr, p->array_size , p->array_size*(*N+1)*sizeof(double));
-			double *new_array = realloc(p->array, p->array_size*(*N+1)*sizeof(double));
+			new_array = PyMem_Realloc(p->array, p->array_size*(*N+1)*sizeof(double));
 			if(new_array == NULL)
 			{
 				p->fail = 2;
@@ -313,49 +361,17 @@ static void SOLOUT(int *NR, double *XOLD, double *X, double *HSOL, double *Y, do
 			}
 		//         fprintf(stderr," -> %p\n", new_array);
 			p->array = new_array;
-		}    
+		}	    
+			
+		ptr = p->array + p->array_pos * (*N+1);
+		ptr[0] = *X;
 		
-		double *ptr = p->array + p->array_pos * (*N+1);
-		ptr[0] = next_x;
-	
-		for(i = 1; i < *N + 1; i++)
+		for(i = 0; i < *N; i++)
 		{
-			ptr[i] = contr5_(&i, N, &next_x, CONT, X, HSOL);
+			ptr[i+1] = Y[i]; 
 		}
 		
 		p->array_pos += 1;
-		p->xpos += 1;
-		next_x = p->xvalues[p->xpos];
-	    }
-    }
-    
-        
-    if(p->full_output)
-    {
-	if(p->array_size == p->array_pos)
-	{
-		p->array_size += p->array_incr;
-	//         fprintf(stderr,"realloc %d->%d (%i)", p->array_size - p->array_incr, p->array_size , p->array_size*(*N+1)*sizeof(double));
-		double *new_array = realloc(p->array, p->array_size*(*N+1)*sizeof(double));
-		if(new_array == NULL)
-		{
-			p->fail = 2;
-			*IRTRN = -1;
-			return;
-		}
-	//         fprintf(stderr," -> %p\n", new_array);
-		p->array = new_array;
-	}	    
-	    
-	double *ptr = p->array + p->array_pos * (*N+1);
-	ptr[0] = *X;
-	
-	for(i = 0; i < *N; i++)
-	{
-		ptr[i+1] = Y[i]; 
-	}
-	
-	p->array_pos += 1;
     }
 }
 
@@ -412,10 +428,9 @@ static PyObject *radar5_radar5(PyObject *self, PyObject *args,PyObject *keywds)
 	int RPAR_len = 0;
 	
 	double *GRID = NULL;
-	
-	memset(p,0,sizeof(params_t));
-	
+
 	int i;
+	int y0_len;
 	
 	PyObject* rpar_obj=NULL;
 	PyObject* lagvars_obj=NULL;
@@ -438,6 +453,8 @@ static PyObject *radar5_radar5(PyObject *self, PyObject *args,PyObject *keywds)
 	
 	/* Parse arguments */
 	static char *kwlist[] = {   "equ", "y0", "xend", "rpar", "ngrid", "lagvars", "lags", "verbose", "mxst", "full_output", NULL};
+	
+	memset(p,0,sizeof(params_t));
 	
 	if (!PyArg_ParseTupleAndKeywords(args, keywds, "OOO|OiOOiii", kwlist, &equ_obj, &y0_obj, &xend_obj, &rpar_obj, &NGRID, &lagvars_obj, &lagfuns_obj, &verbose, &MXST,&full_output_flag))
 		return NULL;
@@ -503,7 +520,7 @@ static PyObject *radar5_radar5(PyObject *self, PyObject *args,PyObject *keywds)
 					return NULL;
 				}
 				
-				int y0_len = PyArray_DIM(time_array, 0);	/* Get initial sequence length */
+				y0_len = PyArray_DIM(time_array, 0);	/* Get initial sequence length */
 				N = PyArray_DIM(values_array, 1);	/* Get system dimension from initial data */
 				
 				p->y0_t0 = *(double*)PyArray_GETPTR1(time_array, y0_len - 1);	/* Get the final time of the initial sequence */
@@ -536,6 +553,8 @@ static PyObject *radar5_radar5(PyObject *self, PyObject *args,PyObject *keywds)
 		}
 		else if(len > 0 && PySequence_Check(PySequence_Fast_GET_ITEM(seq, 0)))
 		{
+			int y0_len;
+			
 			/* Looks like a 2D array : time data might be its first row. This is useful to "continue" an integration, because it's the integrator output format. */
 			PyArrayObject *full_array = (PyArrayObject*)PyArray_ContiguousFromAny(y0_obj, NPY_DOUBLE, 2, 2);
 			if(PyErr_Occurred())
@@ -544,7 +563,7 @@ static PyObject *radar5_radar5(PyObject *self, PyObject *args,PyObject *keywds)
 				goto cleanup;
 			}
 			
-			int y0_len = PyArray_DIM(full_array, 0);
+			y0_len = PyArray_DIM(full_array, 0);
 			N = PyArray_DIM(full_array, 1) - 1;
 					
 			p->y0_t0 = *(double*)PyArray_GETPTR2(full_array, y0_len - 1, 0);
@@ -583,9 +602,13 @@ static PyObject *radar5_radar5(PyObject *self, PyObject *args,PyObject *keywds)
 					p->py_y0[i] = item;
 					if(verbose)
 					{
-						PySys_WriteStderr("Initial value: y[%d](t<0) = ", i);
-						PyObject_Print(item, stderr, 0);
-						PySys_WriteStderr("\n");
+						PyObject *repr = PyObject_Repr(item);
+#if PY_MAJOR_VERSION >= 3
+						PySys_WriteStderr("Initial value: y[%d](t<0) = %s\n", i, PyUnicode_AsUTF8(repr));
+#else			
+						PySys_WriteStderr("Initial value: y[%d](t<0) = %s\n", i, PyString_AsString(repr));
+#endif
+						Py_DECREF(repr);
 					}
 				}
 				else
@@ -598,7 +621,7 @@ static PyObject *radar5_radar5(PyObject *self, PyObject *args,PyObject *keywds)
 					}
 					p->constant_y0[i] = y0;
 					p->py_y0[i] = NULL;
-					if(verbose) PySys_WriteStderr("Initial value: y[%d](t<0) = %f (constant)\n", i, y0);
+					if(verbose) PySys_WriteStderr("Initial value: y[%d](t<0) = %g (constant)\n", i, y0);
 				}
 			}
 			
@@ -639,7 +662,7 @@ static PyObject *radar5_radar5(PyObject *self, PyObject *args,PyObject *keywds)
 			PyObject *item = PySequence_Fast_GET_ITEM(seq, i);
 			RPAR[i] = PyFloat_AsDouble(item);
 			
-			if(verbose) PySys_WriteStderr("Constant parameter %d : %f\n", i,RPAR[i]);
+			if(verbose) PySys_WriteStderr("Constant parameter %d : %g\n", i,RPAR[i]);
 		}
 		Py_DECREF(seq); 
 	}
@@ -687,9 +710,13 @@ static PyObject *radar5_radar5(PyObject *self, PyObject *args,PyObject *keywds)
 				
 				if(verbose)
 				{
-					PySys_WriteStderr("Lag %d is a Python function: ", i);
-					PyObject_Print(item, stderr, 0);
-					PySys_WriteStderr("\n");
+					PyObject *repr = PyObject_Repr(item);
+#if PY_MAJOR_VERSION >= 3
+					PySys_WriteStderr("Lag %d is a Python function: %s\n", i, PyUnicode_AsUTF8(repr));
+#else			
+					PySys_WriteStderr("Lag %d is a Python function: %s\n", i, PyString_AsString(repr));
+#endif
+					Py_DECREF(repr);
 				}
 			}
 			else if(PyNumber_Check(item))
@@ -698,7 +725,7 @@ static PyObject *radar5_radar5(PyObject *self, PyObject *args,PyObject *keywds)
 				p->constant_lags[i]=delay;
 				p->py_lagfuns[i]=NULL;
 				p->c_lagfuns[i]=NULL;
-				if(verbose) PySys_WriteStderr("Lag %d is constant: %f\n", i, delay);
+				if(verbose) PySys_WriteStderr("Lag %d is constant: %g\n", i, delay);
 			}
 			else
 			{
@@ -711,28 +738,6 @@ static PyObject *radar5_radar5(PyObject *self, PyObject *args,PyObject *keywds)
 		Py_DECREF(seq); 
 	}
 	
-	
-	GRID = malloc(sizeof(double) * (NGRID + 1));
-			
-	
-	if(p->xvalues)
-	{
-		p->array_size = p->xvalues_len;
-	}
-	else
-	{
-		p->array_size = NGRID;    // taille initiale
-	}
-	
-	double *initial_array = malloc(p->array_size*(N+1)*sizeof(double));
-	if(verbose) PySys_WriteStderr("Allocate initial array (size %gkB) at %p\n", p->array_size*(N+1.)*sizeof(double)/1024, initial_array);
-	
-	p->array =  initial_array;
-	p->array_pos = 0;
-	p->array_incr = p->array_size / 4;    // increment taille
-	
-	p->user_params = RPAR;
-	
 	/* Set RHS function, either Python or C. */
 	if(PyCallable_Check(equ_obj))
 	{
@@ -741,9 +746,13 @@ static PyObject *radar5_radar5(PyObject *self, PyObject *args,PyObject *keywds)
 		
 		if(verbose)
 		{
-			PySys_WriteStderr("Equation is a Python function: ");
-			PyObject_Print(equ_obj, stderr, 0);
-			PySys_WriteStderr("\n");
+			PyObject *repr = PyObject_Repr(equ_obj);
+#if PY_MAJOR_VERSION >= 3
+			PySys_WriteStderr("Equation is a Python function:  %s\n", PyUnicode_AsUTF8(repr));
+#else			
+			PySys_WriteStderr("Equation is a Python function:  %s\n", PyString_AsString(repr));
+#endif
+			Py_DECREF(repr);
 		}
 		
 		/* Create a Python wrapper for the function that will be used to get delayed values in RHS */
@@ -771,14 +780,7 @@ static PyObject *radar5_radar5(PyObject *self, PyObject *args,PyObject *keywds)
 		PyObject *str = equ_obj;
 #endif
 #ifdef WITH_TCC
-		
-		if(verbose) PySys_WriteStderr("Equation is C code, try to compile it...\n");
-		
-		/* Create a minimal TCC context */
-		tcc = tcc_new();
-		tcc_set_options(tcc, "-nostdlib");
-		tcc_set_error_func(tcc, NULL, _tcc_error);
-		
+
 		/* We need to provide some math functions in order to do useful stuff. */
 		const struct
 		{
@@ -789,7 +791,6 @@ static PyObject *radar5_radar5(PyObject *self, PyObject *args,PyObject *keywds)
 					   {"log", log},	{"pow", pow},	{"log10", log10},
 					   {"cosh", cosh},	{"sinh", sinh},	{"tanh", tanh}};
 		const int nsymbols = sizeof(symbols)/sizeof(symbols[0]);
-
 		char *source = malloc(PyBytes_Size(str) + nsymbols * 128 + 128);
 		
 		/* This one can be useful too. */
@@ -800,9 +801,16 @@ static PyObject *radar5_radar5(PyObject *self, PyObject *args,PyObject *keywds)
 
 		sprintf(source + pos, "\n%s", PyBytes_AsString(str));
 		
+		if(verbose) PySys_WriteStderr("Equation is C code, try to compile it...\n");
+		
+		/* Create a minimal TCC context */
+		tcc = tcc_new();
+		tcc_set_options(tcc, "-nostdlib");
+		tcc_set_error_func(tcc, NULL, _tcc_error);
+		tcc_set_output_type(tcc, TCC_OUTPUT_MEMORY);
+		
 		/* Compile the code snippet */
-		int result = tcc_compile_string(tcc, source);
-		if(result < 0)
+		if(tcc_compile_string(tcc, source) < 0)
 		{
 			free(source);
 			goto cleanup;
@@ -816,8 +824,7 @@ static PyObject *radar5_radar5(PyObject *self, PyObject *args,PyObject *keywds)
 			tcc_add_symbol(tcc, symbols[i].name, symbols[i].ptr);
 		
 		/* Linking */
-		result = tcc_relocate(tcc, TCC_RELOCATE_AUTO);
-		if(result < 0)
+		if(tcc_relocate(tcc, TCC_RELOCATE_AUTO) < 0)
 		{
 // 			PyErr_SetString(PyExc_RuntimeError, "Equation could not be compiled (relocation error).");
 			goto cleanup;
@@ -852,6 +859,26 @@ static PyObject *radar5_radar5(PyObject *self, PyObject *args,PyObject *keywds)
 		p->c_fcn = PyCapsule_GetPointer(equ_obj, NULL);
 		if(verbose) PySys_WriteStderr("Equation is a raw C function: %p\n", p->c_fcn);
 	}
+	
+	GRID = malloc(sizeof(double) * (NGRID + 1));
+			
+	
+	if(p->xvalues)
+	{
+		p->array_size = p->xvalues_len;
+	}
+	else
+	{
+		p->array_size = NGRID;    // taille initiale
+	}
+	
+	p->array = PyMem_Malloc(p->array_size*(N+1)*sizeof(double));
+	if(verbose) PySys_WriteStderr("Allocate initial array (size %gkB) at %p\n", p->array_size*(N+1.)*sizeof(double)/1024, p->array);
+	
+	p->array_pos = 0;
+	p->array_incr = p->array_size / 4;    // increment taille
+	
+	p->user_params = RPAR;
         
 	p->fail = 0;
 	p->interactive = 0;
@@ -875,7 +902,7 @@ static PyObject *radar5_radar5(PyObject *self, PyObject *args,PyObject *keywds)
 	for(i=1;i<N+1;i++)
 	{
 		Y[i-1] = PHI(&i, &X, RPAR, IPAR);
-		if(verbose) PySys_WriteStderr("Initial value Y[%d]=%g\n", i, Y[i-1]);
+		if(verbose) PySys_WriteStderr("Initial value: Y[%d]=%g\n", i-1, Y[i-1]);
 	}
         
 
@@ -930,8 +957,10 @@ static PyObject *radar5_radar5(PyObject *self, PyObject *args,PyObject *keywds)
 	}
 	
 	/* Create numpy array based on integrator output : */
-	npy_intp dims[2] = {p->array_pos, N+1};
-	output_array = PyArray_SimpleNewFromData(2, dims, NPY_DOUBLE, p->array);
+	{
+		npy_intp dims[2] = {p->array_pos, N+1};
+		output_array = PyArray_SimpleNewFromData(2, dims, NPY_DOUBLE, p->array);
+	}
         
 #if NPY_API_VERSION >= 9
 	PyArray_ENABLEFLAGS((PyArrayObject*)output_array, NPY_ARRAY_OWNDATA);
