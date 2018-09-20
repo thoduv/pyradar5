@@ -1,0 +1,9 @@
+include requirements.txt
+include capsulethunk.h
+include radar5.h
+include LICENSE
+recursive-include tcc *
+prune tcc/tests
+prune tcc/examples
+prune tcc/win32/examples
+recursive-include radar5 *
