@@ -30,14 +30,13 @@ def configuration(parent_package='', top_path=None):
 						
 	return config
 
-metadata = dict(version= '0.6',
+metadata = dict(version= '0.7',
 		    author= u'Aurélien Thorette',
 		    author_email='thoduv@free.fr',
 		    url='https://github.com/thoduv/pyradar5',
 		    license='LGPL',
 		    description = 'Python wrapper of the RADAR5 solver for delayed differential equations (DDE).',
-		    long_description= '''The radar5 module is a numerical solver for delay differential equations. It is a wrapper around an original FORTRAN code, that uses a colocation method on Radau nodes for an efficient integration of stiff problems. Please note that all the capabilities of the FORTRAN code are not wrapped yet.
-	The original FORTRAN code is the work of Nicola Guglielmi and Ernst Hairer, and can be found on: http://www.unige.ch/~hairer/software.html''',
+		    long_description= '''The radar5 module is a numerical solver for delay differential equations. It is a wrapper around an original FORTRAN code, that uses a colocation method on Radau nodes for an efficient integration of stiff problems. Please note that all the capabilities of the FORTRAN code are not wrapped yet. The original FORTRAN code is the work of Nicola Guglielmi and Ernst Hairer, and can be found on: http://www.unige.ch/~hairer/software.html''',
 			install_requires=['numpy'],
 			setup_requires=['numpy'],
 		    classifiers=[
