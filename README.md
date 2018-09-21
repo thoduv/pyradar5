@@ -6,8 +6,6 @@ The radar5 module is a numerical solver for delay differential equations. It is 
 
 The original FORTRAN code is the work of Nicola Guglielmi and Ernst Hairer, and can be found on: http://www.unige.ch/~hairer/software.html
 
-[1] N. Guglielmi and E. Hairer, "Users' Guide for the code RADAR5 - Version 2.1", Technical Report, July 2005.
-
 ## Installation
 
 The module has been successfully tested on Windows and Linux x86_64. It has not been tested on OSX yet. 
@@ -31,9 +29,9 @@ This will build the package against the systemwide version of numpy version, whi
 ## Usage
 
 A very simple example can be run straight away to check if the installation went well.
-``python
->>> import radar5
->>> radar5.test()
+```python
+import radar5
+radar5.test()
 ```
 
 If you have `matplotlib`, a window with two oscillating curves should pop up.

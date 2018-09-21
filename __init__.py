@@ -1,4 +1,8 @@
 # -*- coding: utf-8 -*-
+try:
+	import radar5.__config__
+except:
+	import __config__
 from .radar5 import radar5
 radar5 = radar5
 

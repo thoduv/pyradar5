@@ -13,7 +13,7 @@ except ImportError:
 import platform
 import setuptools
 from numpy.distutils.core import setup
-from numpy.distutils.misc_util import Configuration
+from numpy.distutils.misc_util import Configuration, generate_config_py
 #from setuptools.distutils.sysconfig import get_python_inc, get_python_lib
 
 def configuration(parent_package='', top_path=None):	
@@ -27,6 +27,8 @@ def configuration(parent_package='', top_path=None):
 						sources = ['wrapper.c','tcc/libtcc.c'],
 						include_dirs=[numpy.get_include()],
 						libraries = ['radar5f'])
+						
+	config.make_config_py()
 						
 	return config
 
