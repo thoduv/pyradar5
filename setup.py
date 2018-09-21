@@ -21,18 +21,16 @@ def configuration(parent_package='', top_path=None):
 	config = Configuration('radar5', parent_package, top_path)
 
 	config.add_library('radar5f', sources=['radar5/radar5.f', 'radar5/dc_decdel.f','radar5/decsol.f' ,'radar5/contr5.f'],
-						extra_f77_compile_args=['-static'],)
+						extra_f77_compile_args=['-static', '-w'],)
 
 	config.add_extension('radar5',
 						sources = ['wrapper.c','tcc/libtcc.c'],
-						include_dirs=[numpy.get_include(), 'C:\\ProgramData\\Anaconda3\\Library\\include'],
-						library_dirs=['C:\\ProgramData\\Anaconda3\\Library\\lib'],
-	#                    libraries = ['gfortran', 'gcc', 'gsl', 'gslcblas', 'radar5f', 'winpthread','pthread','mingw32','quadmath','mingwex','win32'])
-						libraries = ['radar5f', 'gsl'] + ['blas'] if not 'Win' in platform.system() else [])
+						include_dirs=[numpy.get_include()],
+						libraries = ['radar5f'])
 						
 	return config
 
-metadata = dict(version= '0.5',
+metadata = dict(version= '0.6',
 		    author= u'Aurélien Thorette',
 		    author_email='thoduv@free.fr',
 		    url='https://github.com/thoduv/pyradar5',

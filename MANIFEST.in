@@ -1,6 +1,7 @@
 include requirements.txt
 include capsulethunk.h
 include radar5.h
+include cspline.c
 include LICENSE
 recursive-include tcc *
 prune tcc/tests

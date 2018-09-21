@@ -1,3 +1,7 @@
+/*
+ * This file implements a Python extension, wrapping the capabilities of the "RADAR5" FORTRAN code.
+ */
+
 #include <stdio.h>
 #include <assert.h> 
 #include <stdlib.h>
@@ -20,8 +24,12 @@
 #	define WIN32
 #endif
 
+#ifdef WITH_GSL
 #include <gsl/gsl_errno.h>
 #include <gsl/gsl_spline.h>
+#else
+#include "cspline.c"
+#endif
 
 #include "radar5.h"
 
@@ -73,7 +81,7 @@ struct params_
 	PyObject *py_lagfuns[10];
 	lag_c_t c_lagfuns[10];
 	double constant_lags[10];
-	PyThreadState *_thead_save;
+	PyThreadState *_thread_save;
 	int interactive;
 	int fail;
 	void *user_params;
@@ -81,8 +89,12 @@ struct params_
 	PyObject *py_rpar;
 	PyObject *py_lag_callback;
 
+#if WITH_GSL
 	gsl_interp_accel *spline_acc;
 	gsl_spline **y0_spline;
+#else
+	cspline_t *y0_spline;
+#endif
 	double y0_t0;
 	
 	_lag_ctx *lag_ctx;
@@ -134,7 +146,11 @@ static void FCN(int *N, double *X, double *Y, double *F, ARGLAG_t ARGLAG, PHI_t 
 		return;
 	
 	/* If it's a Python function, then we have to tell Python we're going to maybe modify things. */
-	PyEval_RestoreThread(p->_thead_save);
+	if(!p->interactive)
+	{
+		PyEval_RestoreThread(p->_thread_save);
+		p->_thread_save = NULL;
+	}
 	
 	p->lag_ctx = &ctx;
 	
@@ -151,7 +167,7 @@ static void FCN(int *N, double *X, double *Y, double *F, ARGLAG_t ARGLAG, PHI_t 
 	{
 		PyErr_Print();
 		Py_DECREF(y_array);
-		p->_thead_save = PyEval_SaveThread();
+		if(!p->interactive) p->_thread_save = PyEval_SaveThread();
 		p->fail = 1;
 		return;
 	}
@@ -161,9 +177,29 @@ static void FCN(int *N, double *X, double *Y, double *F, ARGLAG_t ARGLAG, PHI_t 
 	seq = PySequence_Fast(ret, "Equation must return a sequence !");
 	if(!seq)
 	{
-		p->_thead_save = PyEval_SaveThread();
-		p->fail = 1;
-		return;
+		PyObject *a, *b, *c;
+		double dy;
+		
+		PyErr_Fetch(&a, &b, &c);
+		PyErr_Clear();
+		
+		dy = PyFloat_AsDouble(ret);
+		
+		if(!PyErr_Occurred() && *N == 1)
+		{
+			if(a) Py_DECREF(a);
+			if(b) Py_DECREF(b);
+			if(c) Py_DECREF(c);
+			F[0] = dy;
+			goto cleanup;
+		}
+		else
+		{
+			PyErr_Restore(a, b, c);
+			if(!p->interactive) p->_thread_save = PyEval_SaveThread();
+			p->fail = 4;
+			return;
+		}
 	}
 	
 	len = PySequence_Size(ret);
@@ -172,8 +208,8 @@ static void FCN(int *N, double *X, double *Y, double *F, ARGLAG_t ARGLAG, PHI_t 
 	{
 		PySys_WriteStderr("Equation returned a sequence of wrong size (%d, expected %d)...\n",len,*N);
 		PyErr_SetString(PyExc_RuntimeError, "Equation function returned bad F(Y) length.");
-		p->fail = 1;
-		p->_thead_save = PyEval_SaveThread();
+		p->fail = 5;
+		if(!p->interactive) p->_thread_save = PyEval_SaveThread();
 		Py_DECREF(ret);
 		return;
 	}
@@ -185,10 +221,12 @@ static void FCN(int *N, double *X, double *Y, double *F, ARGLAG_t ARGLAG, PHI_t 
 		F[i] = PyFloat_AsDouble(item);
 	}
 	
-	Py_DECREF(ret);
 	Py_DECREF(seq); 
 	
-	p->_thead_save = PyEval_SaveThread();
+cleanup:	
+	Py_DECREF(ret);
+	
+	if(!p->interactive) p->_thread_save = PyEval_SaveThread();
 }
 
 static double PHI(int *I, double *X, double *RPAR, int *IPAR)
@@ -200,22 +238,40 @@ static double PHI(int *I, double *X, double *RPAR, int *IPAR)
 	double y0;
 	
 	if(fun)
-	{
-		PyEval_RestoreThread(p->_thead_save);
+	{	
+		if(!p->interactive && p->_thread_save) {
+			PyEval_RestoreThread(p->_thread_save);
+		}
+		
 		ret = PyObject_CallFunction(fun, "d", *X);
-		p->_thead_save = PyEval_SaveThread();
+		
 		if(!ret || PyErr_Occurred())
 		{
 			PyErr_Print();
+			p->fail = 1;
+			if(!p->interactive && p->_thread_save) p->_thread_save = PyEval_SaveThread();
+			return 0;
 		}
 		y0 = PyFloat_AsDouble(ret);
+		if(PyErr_Occurred())
+		{
+			PyErr_Print();
+			p->fail = 4;
+		}
 		Py_DECREF(ret);
-//         fprintf(stderr,"Phi %d: %p -> %f\n", i, fun, y0);
+		
+		if(!p->interactive && p->_thread_save) p->_thread_save = PyEval_SaveThread();
 		return y0;
 	}
 	else if(p->y0_spline)
 	{
+#ifdef WITH_GSL
 		return gsl_spline_eval (p->y0_spline[i], *X + p->y0_t0, p->spline_acc);
+#else
+		double y = 0;
+		cspline_eval(&p->y0_spline[i], *X + p->y0_t0, &y);
+		return y;
+#endif
 //		fprintf(stderr,"PHI(%g->%g)[%d]=%g\n",*X,*X+p->y0_t0,i,y);
 	}
 	else
@@ -246,9 +302,8 @@ static double ARGLAG(int *IL, double *X, double *Y,double *RPAR, int *IPAR, PHI_
     }
     else
     {
-        PyEval_RestoreThread(p->_thead_save);
+        if(!p->interactive && p->_thread_save) PyEval_RestoreThread(p->_thread_save);
         ret = PyObject_CallFunction(pyfun, "dd", *X, *Y);
-        p->_thead_save = PyEval_SaveThread();
         if(!ret || PyErr_Occurred())
         {
             PyErr_Print();
@@ -257,6 +312,7 @@ static double ARGLAG(int *IL, double *X, double *Y,double *RPAR, int *IPAR, PHI_
 		r = PyFloat_AsDouble(ret);
         Py_DECREF(ret);
 //          fprintf(stderr,"Lag %d: %p -> %f\n", ilag, fun, r);
+	if(!p->interactive && p->_thread_save) p->_thread_save = PyEval_SaveThread();
         return r;
     }
 }
@@ -283,7 +339,7 @@ static void SOLOUT(int *NR, double *XOLD, double *X, double *HSOL, double *Y, do
     {
         if(PyErr_CheckSignals())
         {
-            p->fail = 1;
+            p->fail = 6;
         }
     }
       
@@ -430,7 +486,8 @@ static PyObject *radar5_radar5(PyObject *self, PyObject *args,PyObject *keywds)
 	double *GRID = NULL;
 
 	int i;
-	int y0_len;
+	
+	int prev_interactive;
 	
 	PyObject* rpar_obj=NULL;
 	PyObject* lagvars_obj=NULL;
@@ -440,11 +497,10 @@ static PyObject *radar5_radar5(PyObject *self, PyObject *args,PyObject *keywds)
 	PyObject* xend_obj=NULL;
 	
 	
-	int full_output_flag = -1;
+	int full_output_flag = 0;
 	
 	PyObject *py_p = NULL;
 	
-	PyObject* seq;
 	int len;
 
 #ifdef WITH_TCC
@@ -472,9 +528,9 @@ static PyObject *radar5_radar5(PyObject *self, PyObject *args,PyObject *keywds)
 			goto cleanup;
 		}
 		
-		p->full_output = full_output_flag == 1 ? 1 : 0;	/* Full output only if specified... */
+		p->full_output = full_output_flag;	/* Full output only if specified... */
 		
-		if(full_output_flag != 1 && PyArray_SIZE(xvalues) == 1)	/* ...or if a single value if given for X */
+		if(PyArray_NDIM(xvalues) == 0)	/* if a single value if given for X, force full output */
 		{
 			p->xvalues = NULL;
 			p->full_output = 1;
@@ -495,7 +551,7 @@ static PyObject *radar5_radar5(PyObject *self, PyObject *args,PyObject *keywds)
 	
 	if(y0_obj)
 	{
-		seq = PySequence_Fast(y0_obj, "Initial values must be provided as a sequence.");
+		PyObject *seq = PySequence_Fast(y0_obj, "Initial values must be provided as a sequence.");
 		if(!seq)
 			return NULL;
 		len = PySequence_Size(y0_obj);
@@ -508,10 +564,11 @@ static PyObject *radar5_radar5(PyObject *self, PyObject *args,PyObject *keywds)
 			
 			/* Check each of (time, values) is iterables. If it is, we suppose we can use them as array. */
 			if(PySequence_Check(time) && PySequence_Check(values))
-			{				
-				// better use PyArray_AsCArray ?
+			{
+				int y0_len;
+				
 				PyArrayObject *time_array = (PyArrayObject*)PyArray_ContiguousFromAny(time, NPY_DOUBLE, 1, 1);
-				PyArrayObject *values_array = (PyArrayObject*)PyArray_ContiguousFromAny(values, NPY_DOUBLE, 2, 2);
+				PyArrayObject *values_array = (PyArrayObject*)PyArray_ContiguousFromAny(values, NPY_DOUBLE, 1, 2);
 				
 				/* Account for format errors */
 				if(!time_array || !values_array)
@@ -521,17 +578,28 @@ static PyObject *radar5_radar5(PyObject *self, PyObject *args,PyObject *keywds)
 				}
 				
 				y0_len = PyArray_DIM(time_array, 0);	/* Get initial sequence length */
-				N = PyArray_DIM(values_array, 1);	/* Get system dimension from initial data */
+				
+				if(PyArray_NDIM(values_array) == 1) N = 1;
+				else N = PyArray_DIM(values_array, 1);	/* Get system dimension from initial data */
 				
 				p->y0_t0 = *(double*)PyArray_GETPTR1(time_array, y0_len - 1);	/* Get the final time of the initial sequence */
+				if(verbose) PySys_WriteStderr("Initial values array as (time->%g, [i0:%d])\n", p->y0_t0, y0_len);
+#ifdef WITH_GSL
 				p->y0_spline = (gsl_spline**)malloc(sizeof(void*) * N);
-				
-				if(verbose) PySys_WriteStderr("Initial values array as (time->%g, [y0:%d])\n", p->y0_t0, y0_len);
+#else
+				p->y0_spline = (cspline_t*)malloc(sizeof(cspline_t) * N);
+#endif				
 				
 				for(i = 0; i < N; i++)
 				{
 					int j;
+#ifdef WITH_GSL
 					gsl_spline *spline = gsl_spline_alloc(gsl_interp_cspline, y0_len);
+#else
+					cspline_t *spline = &p->y0_spline[i];
+					cspline_init(spline);
+					cspline_alloc_xy(spline, y0_len);
+#endif
 
 					/* Copy time data */
 					memcpy (spline->x, (double*)PyArray_DATA(time_array), y0_len * sizeof(double));
@@ -543,8 +611,12 @@ static PyObject *radar5_radar5(PyObject *self, PyObject *args,PyObject *keywds)
 					}
 					
 					/* Initialize interpolator */
+#ifdef WITH_GSL					
 					gsl_interp_init (spline->interp, spline->x, spline->y, y0_len);
 					p->y0_spline[i] = spline;
+#else
+					cspline_compute_nat (spline);
+#endif
 				}
 				
 				Py_DECREF(time_array);
@@ -567,14 +639,24 @@ static PyObject *radar5_radar5(PyObject *self, PyObject *args,PyObject *keywds)
 			N = PyArray_DIM(full_array, 1) - 1;
 					
 			p->y0_t0 = *(double*)PyArray_GETPTR2(full_array, y0_len - 1, 0);
+#ifdef WITH_GSL
 			p->y0_spline = (gsl_spline**)malloc(sizeof(void*) * N);
+#else
+			p->y0_spline = (cspline_t*)malloc(sizeof(cspline_t) * N);
+#endif	
 			
 			if(verbose) PySys_WriteStderr("Initial values array as [time->%g, y0:%d]\n", p->y0_t0, y0_len);
 				
 			for(i = 0; i < N; i++)
 			{
 				int j;
+#ifdef WITH_GSL
 				gsl_spline *spline = gsl_spline_alloc(gsl_interp_cspline, y0_len);
+#else
+				cspline_t *spline = &p->y0_spline[i];
+				cspline_init(spline);
+				cspline_alloc_xy(spline, y0_len);
+#endif
 
 				for(j = 0; j < y0_len; j++)
 				{
@@ -582,8 +664,12 @@ static PyObject *radar5_radar5(PyObject *self, PyObject *args,PyObject *keywds)
 					spline->y[j] = *(double*)PyArray_GETPTR2(full_array, j, i + 1);
 				}
 					
+#ifdef WITH_GSL					
 				gsl_interp_init (spline->interp, spline->x, spline->y, y0_len);
 				p->y0_spline[i] = spline;
+#else
+				cspline_compute_nat (spline);
+#endif
 			}
 			
 			Py_DECREF(full_array);
@@ -652,7 +738,7 @@ static PyObject *radar5_radar5(PyObject *self, PyObject *args,PyObject *keywds)
 	/* Load system numerical parameters. */
 	if(rpar_obj)
 	{
-		seq = PySequence_Fast(rpar_obj, "Constant parameters must be provided as a sequence.");
+		PyObject *seq = PySequence_Fast(rpar_obj, "Constant parameters must be provided as a sequence.");
 		if(!seq) goto cleanup;
 		RPAR_len = PySequence_Size(rpar_obj);
 		
@@ -669,7 +755,7 @@ static PyObject *radar5_radar5(PyObject *self, PyObject *args,PyObject *keywds)
         
 	if(lagvars_obj)
 	{
-		seq = PySequence_Fast(lagvars_obj, "Delayed variables must be provided as a sequence.");
+		PyObject *seq = PySequence_Fast(lagvars_obj, "Delayed variables must be provided as a sequence.");
 		if(!seq) goto cleanup;
 		len = PySequence_Size(lagvars_obj);
 
@@ -692,11 +778,21 @@ static PyObject *radar5_radar5(PyObject *self, PyObject *args,PyObject *keywds)
 		IWORK[14] = i; // number of dense solution (lags)
 		Py_DECREF(seq); 
 	}
+	else
+	{
+		/* By default, all variables are delayed */
+		for (i = 0; i < N; i++)
+		{
+			IPAST[i]=i+1;
+		}
+		IWORK[14] = N;
+		if(verbose) PySys_WriteStderr("Delayed variables unspecified: by default all %d variables are selected.\n", N);
+	}
 	
 			
 	if(lagfuns_obj)
 	{
-		seq = PySequence_Fast(lagfuns_obj, "Lags must be provided as a sequence.");
+		PyObject *seq = PySequence_Fast(lagfuns_obj, "Lags must be provided as a sequence.");
 		if(!seq) goto cleanup;
 		len = PySequence_Size(lagfuns_obj);
 
@@ -897,20 +993,23 @@ static PyObject *radar5_radar5(PyObject *self, PyObject *args,PyObject *keywds)
 	{
 		GRID[i] = XEND/(NGRID+1)*i;
 	} 
-	
-	/* Load initial values */
+        
+        /* Load initial values */
+	prev_interactive = p->interactive;
+	p->interactive = 1;
 	for(i=1;i<N+1;i++)
 	{
 		Y[i-1] = PHI(&i, &X, RPAR, IPAR);
 		if(verbose) PySys_WriteStderr("Initial value: Y[%d]=%g\n", i-1, Y[i-1]);
 	}
+	p->interactive = prev_interactive;
+	
         
-
-	/* MAIN CALL TO THE INTEGRATOR */
+	/* MAIN CALL TO THE INTEGRATOR AHEAD */
 	
 	if(!p->interactive)
 	{
-		p->_thead_save = PyEval_SaveThread();	/* Promise Python that we are not going to mess with any of its data. */
+		p->_thread_save = PyEval_SaveThread();	/* Promise Python that we are not going to mess with any of its data. */
 							/* This allows other threads/event loops to run during the integration. */
 	}
 
@@ -928,10 +1027,22 @@ static PyObject *radar5_radar5(PyObject *self, PyObject *args,PyObject *keywds)
 	
 	if(!p->interactive)
 	{
-		PyEval_RestoreThread(p->_thead_save);
+		PyEval_RestoreThread(p->_thread_save);
 	}
 	
 	/* DONE ! */
+	
+	if(verbose)
+	{
+		switch(p->fail)
+		{
+			case 1: PySys_WriteStderr("Python function produced an error.\n"); break;
+			case 3: PySys_WriteStderr("Computation halted by stop().\n"); break;
+			case 4: 
+			case 5: PySys_WriteStderr("Python function provided wrong return type.\n"); break;
+			case 6: PySys_WriteStderr("Computation halted by an external signal.\n"); break;
+		}
+	}
 	
 	if(p->fail == 2)
 	{
@@ -982,16 +1093,22 @@ cleanup:
 		if(verbose) PySys_WriteStderr("Clearing initial values...\n");
 		for(i = 0; i < N; i++)
 		{
+#ifdef WITH_GSL			
 			if(p->y0_spline[i])
 				gsl_spline_free(p->y0_spline[i]);
+#else
+			cspline_free(&p->y0_spline[i]);
+#endif
 		}
 		free(p->y0_spline);
 	}
-		
+	
+#ifdef WITH_GSL	
 	if(p->spline_acc)
 	{
 		gsl_interp_accel_free (p->spline_acc);
 	}
+#endif
 	
 	if(p->py_lag_callback)
 		Py_DECREF(p->py_lag_callback);
@@ -1017,7 +1134,7 @@ static PyObject *radar5_stop(PyObject *self, PyObject *args)
 {    
 	if(current_p)
 	{
-		current_p->fail = 1;
+		current_p->fail = 3;
 	}
 	Py_RETURN_NONE;
 }
