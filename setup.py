@@ -30,7 +30,7 @@ def configuration(parent_package='', top_path=None):
 						
 	return config
 
-metadata = dict(version= '0.8',
+metadata = dict(version= '0.1',
 		author= u'Aurélien Thorette',
 		author_email='thoduv@free.fr',
 		url='https://github.com/thoduv/pyradar5',
