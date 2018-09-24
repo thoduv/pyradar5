@@ -30,7 +30,7 @@ def configuration(parent_package='', top_path=None):
 						
 	return config
 
-metadata = dict(version= '0.1',
+metadata = dict(version= '0.8',
 		author= u'Aurélien Thorette',
 		author_email='thoduv@free.fr',
 		url='https://github.com/thoduv/pyradar5',
@@ -41,7 +41,7 @@ metadata = dict(version= '0.1',
 		setup_requires=['numpy'],
 		keywords=['delay', 'differential equation', 'numerical', 'radar5',
 			'dde', 'integration', 'mathematics'],
-		packages=find_packages(),
+		packages=setuptools.find_packages(),
 		classifiers=[
 	"Topic :: Scientific/Engineering",
 	"Programming Language :: Python :: 3",
