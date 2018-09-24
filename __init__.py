@@ -6,6 +6,9 @@ except:
 from .radar5 import radar5
 radar5 = radar5
 
+version = 0.1
+__version__ = version
+
 def test():
     import numpy as np
     import pylab as plt

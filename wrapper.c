@@ -508,11 +508,11 @@ static PyObject *radar5_radar5(PyObject *self, PyObject *args,PyObject *keywds)
 #endif	
 	
 	/* Parse arguments */
-	static char *kwlist[] = {   "equ", "y0", "xend", "rpar", "ngrid", "lagvars", "lags", "verbose", "mxst", "full_output", NULL};
+	static char *kwlist[] = {"equ", "y0", "xend", "rpar", "ngrid", "lagvars", "lags", "verbose", "mxst", "full_output", "rtol", "atol", "initial_stepsize", NULL};
 	
 	memset(p,0,sizeof(params_t));
 	
-	if (!PyArg_ParseTupleAndKeywords(args, keywds, "OOO|OiOOiii", kwlist, &equ_obj, &y0_obj, &xend_obj, &rpar_obj, &NGRID, &lagvars_obj, &lagfuns_obj, &verbose, &MXST,&full_output_flag))
+	if (!PyArg_ParseTupleAndKeywords(args, keywds, "OOO|OiOOiiifff", kwlist, &equ_obj, &y0_obj, &xend_obj, &rpar_obj, &NGRID, &lagvars_obj, &lagfuns_obj, &verbose, &MXST,&full_output_flag,&RTOL,&ATOL,&H))
 		return NULL;
         
 	if(verbose) PySys_WriteStderr("RADAR5 wrapper (verbose = %d)\n", verbose);
@@ -1182,6 +1182,12 @@ PyDoc_STRVAR(radar5_doc,
 "    Changes the size of the internal grid. Might need some tuning if integration fails unexpectedly."
 ":param mxst : int, optional\n"
 "    Changes the size of the internal past storage. Might need some tuning if integration fails unexpectedly with 'MXST' related errors."
+":param atol : float, optional\n"
+"    Changes the absolute tolerance (default is 1e-6)\n"
+":param rtol : float, optional\n"
+"    Changes the relative tolerance (default is 1e-6)\n"
+":param initial_stepsize : float, optional\n"
+"    Initial guess for the stepsize; for stiff equations with initial transient, H=1/(norm of F'); usually 1e-3 or 1e-5 is good. (default is 1e-6)\n" 
 ":param verbose : bool, optional\n"
 "    Enable printing of troubleshooting informations."
 ":param full_output : bool, optional\n"
